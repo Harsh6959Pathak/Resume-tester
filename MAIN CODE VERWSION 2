@@ -1,0 +1,93 @@
+# Install dependencies (if needed)
+!pip install gradio pandas nltk scikit-learn sentence-transformers torch
+
+# Import Libraries
+import gradio as gr
+import pandas as pd
+import re
+import ast
+import numpy as np
+import nltk
+import torch
+from nltk.corpus import stopwords
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from sentence_transformers import SentenceTransformer
+
+# Download stopwords
+nltk.download('stopwords')
+
+# Function to Clean Text
+def clean_text(text):
+    if pd.isna(text):
+        return ""
+    text = text.lower()
+    text = re.sub(r'[^a-zA-Z0-9 ]', '', text)
+    text = ' '.join([word for word in text.split() if word not in stopwords.words('english')])
+    return text
+
+# Main Resume Processing Function
+def process_resumes(file, job_description):
+    try:
+        if file is None:
+            return "⚠️ Please upload a valid CSV file!"
+        
+        df = pd.read_csv(file.name)
+        
+        # Required columns
+        required_columns = {'skills', 'career_objective', 'degree_names', 'major_field_of_studies', 'positions', 'responsibilities'}
+        if not required_columns.issubset(set(df.columns)):
+            return f"⚠️ Missing required columns! Required: {required_columns}"
+        
+        # Clean text columns
+        for col in required_columns:
+            df[col] = df[col].apply(clean_text)
+        
+        # Combine text into a single resume text
+        df['resume_text'] = df[list(required_columns)].agg(' '.join, axis=1)
+
+        # Clean job description
+        jd_cleaned = clean_text(job_description)
+
+        # TF-IDF Vectorization
+        tfidf = TfidfVectorizer()
+        resume_tfidf = tfidf.fit_transform(df['resume_text'])
+        jd_tfidf = tfidf.transform([jd_cleaned])
+
+        # Compute Cosine Similarity
+        cosine_scores = cosine_similarity(jd_tfidf, resume_tfidf)[0]
+        df['similarity_score'] = cosine_scores
+
+        # Load BERT Model
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        bert_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2').to(device)
+        resume_embeddings = bert_model.encode(df['resume_text'].tolist(), convert_to_tensor=True)
+        jd_embedding = bert_model.encode([jd_cleaned], convert_to_tensor=True)
+        bert_scores = cosine_similarity(jd_embedding.cpu().numpy(), resume_embeddings.cpu().numpy())[0]
+        df['bert_score'] = bert_scores
+
+        # Final Score (Weighted Combination)
+        df['final_score'] = 0.5 * df['similarity_score'] + 0.5 * df['bert_score']
+
+        # Select Top 3 Candidates
+        top_candidates = df.nlargest(3, 'final_score')[['resume_text', 'final_score']]
+
+        return top_candidates.to_markdown()
+
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+# Gradio UI
+interface = gr.Interface(
+    fn=process_resumes,
+    inputs=[
+        gr.File(label="Upload CSV File"),
+        gr.Textbox(label="Job Description", placeholder="Enter job description here...")
+    ],
+    outputs="markdown",
+    title="Resume Ranking App",
+    description="Upload a CSV file with resumes and enter a job description to get top-ranked candidates."
+)
+
+# Launch Web App
+interface.launch(share=True)
