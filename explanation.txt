@@ -1,0 +1,78 @@
+This script implements a Resume Ranking App using Gradio. Here's an explanation of the model choice and preprocessing steps:
+
+Model Choice
+TF-IDF (Term Frequency-Inverse Document Frequency)
+
+This is a classic NLP technique used to transform text into numerical representations.
+
+It helps measure the importance of words in a document relative to a set of documents.
+
+Why TF-IDF?
+
+Efficient for handling structured text.
+
+Works well for small datasets.
+
+Provides quick cosine similarity scores.
+
+Sentence Transformer (BERT-based model)
+
+The script uses sentence-transformers/all-mpnet-base-v2, a pre-trained BERT variant that generates high-quality sentence embeddings.
+
+These embeddings are used to compute similarity scores using cosine similarity.
+
+Why BERT?
+
+Captures semantic meaning beyond keywords.
+
+More accurate than traditional TF-IDF for ranking resumes based on job descriptions.
+
+Final Score Computation
+
+A weighted combination of TF-IDF cosine similarity (50%) and BERT similarity (50%) determines the final ranking.
+
+This balances traditional keyword-based and semantic-based matching.
+
+Preprocessing Steps
+Text Cleaning (clean_text function)
+
+Converts text to lowercase.
+
+Removes special characters and punctuation.
+
+Removes stopwords (common words like "the", "is", etc.).
+
+Applied to both resumes and the job description.
+
+Resume Text Aggregation
+
+Combines multiple resume fields (skills, career_objective, degree_names, etc.) into a single resume_text field.
+
+TF-IDF Vectorization
+
+Computes TF-IDF vectors for resumes and job descriptions.
+
+Calculates cosine similarity scores.
+
+BERT Embedding & Cosine Similarity
+
+Encodes text into sentence embeddings.
+
+Computes similarity scores using cosine similarity.
+
+Final Selection
+
+Ranks candidates based on the final_score.
+
+Returns the top 3 candidates.
+
+Why This Approach?
+Combines traditional and modern NLP techniques for better accuracy.
+
+Balances efficiency and effectiveness:
+
+TF-IDF is fast and keyword-based.
+
+BERT captures deep contextual meanings.
+
+Uses Gradio for a simple UI to make the tool accessible.
