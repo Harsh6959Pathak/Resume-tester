@@ -35,7 +35,7 @@ venv\Scripts\activate     # On Windows
 
 ### 3️⃣ Install dependencies
 ```bash
-pip install -r requirements.txt
+pip install gradio
 ```
 
 ## ▶️ Running the Application
@@ -43,6 +43,10 @@ pip install -r requirements.txt
 python app.py
 ```
 The app will launch in your browser using **Gradio UI**.
+
+## ▶️ Running The Video Explanation
+
+https://drive.google.com/file/d/1yxtxQkCckXBR04zC-Uckf-8tvEPCFyMH/view?usp=sharing
 
 ## 📊 Model Explanation
 The application uses:
