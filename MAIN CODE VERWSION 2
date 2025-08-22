@@ -1,93 +1,96 @@
-# Install dependencies (if needed)
-!pip install gradio pandas nltk scikit-learn sentence-transformers torch
+!pip install gradio sentence-transformers nltk scikit-learn pandas torch
 
-# Import Libraries
 import gradio as gr
 import pandas as pd
 import re
-import ast
-import numpy as np
-import nltk
 import torch
+import nltk
 from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
+import time
 
-# Download stopwords
+# Download stopwords once
 nltk.download('stopwords')
 
-# Function to Clean Text
+# Load pretrained model
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model_name = 'sentence-transformers/all-MiniLM-L6-v2'
+bert_model = SentenceTransformer(model_name).to(device)
+
+# Clean and preprocess text
 def clean_text(text):
     if pd.isna(text):
         return ""
     text = text.lower()
     text = re.sub(r'[^a-zA-Z0-9 ]', '', text)
-    text = ' '.join([word for word in text.split() if word not in stopwords.words('english')])
-    return text
+    stop_words = set(stopwords.words('english'))
+    filtered = ' '.join([word for word in text.split() if word not in stop_words])
+    return filtered
 
-# Main Resume Processing Function
-def process_resumes(file, job_description):
+# Resume ranking function
+def rank_resumes(file, job_desc):
+    start_time = time.time()
+    if file is None:
+        return "⚠️ Please upload a CSV file!"
+
     try:
-        if file is None:
-            return "⚠️ Please upload a valid CSV file!"
-        
-        df = pd.read_csv(file.name)
-        
-        # Required columns
-        required_columns = {'skills', 'career_objective', 'degree_names', 'major_field_of_studies', 'positions', 'responsibilities'}
-        if not required_columns.issubset(set(df.columns)):
-            return f"⚠️ Missing required columns! Required: {required_columns}"
-        
-        # Clean text columns
-        for col in required_columns:
+        df = pd.read_csv(file.name, encoding='latin1')
+
+        required_cols = ['skills', 'career_objective', 'degree_names', 'major_field_of_studies', 'positions', 'responsibilities']
+        missing = [col for col in required_cols if col not in df.columns]
+        if missing:
+            return f"⚠️ Missing columns: {missing}"
+
+        # Clean text columns and combine
+        for col in required_cols:
             df[col] = df[col].apply(clean_text)
-        
-        # Combine text into a single resume text
-        df['resume_text'] = df[list(required_columns)].agg(' '.join, axis=1)
+
+        df['combined_text'] = df[required_cols].agg(' '.join, axis=1)
 
         # Clean job description
-        jd_cleaned = clean_text(job_description)
+        jd_clean = clean_text(job_desc)
 
-        # TF-IDF Vectorization
-        tfidf = TfidfVectorizer()
-        resume_tfidf = tfidf.fit_transform(df['resume_text'])
-        jd_tfidf = tfidf.transform([jd_cleaned])
+        # Compute embeddings
+        resume_embeds = bert_model.encode(df['combined_text'].tolist(), convert_to_tensor=True, device=device)
+        jd_embed = bert_model.encode([jd_clean], convert_to_tensor=True, device=device)
 
-        # Compute Cosine Similarity
-        cosine_scores = cosine_similarity(jd_tfidf, resume_tfidf)[0]
-        df['similarity_score'] = cosine_scores
+        # Cosine similarity scores
+        scores = cosine_similarity(jd_embed.cpu().numpy(), resume_embeds.cpu().numpy())[0]
+        df['similarity_score'] = scores
 
-        # Load BERT Model
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        bert_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2').to(device)
-        resume_embeddings = bert_model.encode(df['resume_text'].tolist(), convert_to_tensor=True)
-        jd_embedding = bert_model.encode([jd_cleaned], convert_to_tensor=True)
-        bert_scores = cosine_similarity(jd_embedding.cpu().numpy(), resume_embeddings.cpu().numpy())[0]
-        df['bert_score'] = bert_scores
+        # Rank top 5 resumes
+        top_df = df.nlargest(5, 'similarity_score').reset_index(drop=True)
 
-        # Final Score (Weighted Combination)
-        df['final_score'] = 0.5 * df['similarity_score'] + 0.5 * df['bert_score']
+        elapsed = round(time.time() - start_time, 2)
 
-        # Select Top 3 Candidates
-        top_candidates = df.nlargest(3, 'final_score')[['resume_text', 'final_score']]
+        # Prepare output table markdown
+        output = f"### 📌 Top 5 Resume Matches (Processed in {elapsed} seconds)\n\n"
+        output += "| Rank | Similarity Score | Resume Preview (first 200 chars) |\n"
+        output += "|-------|-----------------|----------------------------------|\n"
 
-        return top_candidates.to_markdown()
+        for i, row in top_df.iterrows():
+            preview = row['combined_text'][:200] + ("..." if len(row['combined_text']) > 200 else "")
+            output += f"| {i+1} | {row['similarity_score']:.4f} | {preview} |\n"
+
+        return output
 
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        return f"⚠️ Error: {str(e)}"
 
-# Gradio UI
-interface = gr.Interface(
-    fn=process_resumes,
-    inputs=[
-        gr.File(label="Upload CSV File"),
-        gr.Textbox(label="Job Description", placeholder="Enter job description here...")
-    ],
-    outputs="markdown",
-    title="Resume Ranking App",
-    description="Upload a CSV file with resumes and enter a job description to get top-ranked candidates."
-)
+# Gradio interface
+with gr.Blocks() as demo:
+    gr.Markdown("# 📄 Resume Tester and Ranking App")
 
-# Launch Web App
-interface.launch(share=True)
+    with gr.Row():
+        resume_file = gr.File(label="Upload Resumes CSV")
+        job_description = gr.Textbox(label="Job Description", lines=5, placeholder="Enter job description here...")
+
+    submit = gr.Button("Rank Resumes")
+
+    result = gr.Markdown()
+
+    submit.click(rank_resumes, inputs=[resume_file, job_description], outputs=result)
+
+demo.launch(share=True)
